@@ -86,6 +86,7 @@ __all__ = [
 	"medoid_silhouette",
 	"KMedoidsResult",
 	"DynkResult",
+	"fasterpam_time"
 ]
 
 class KMedoidsResult:
@@ -180,6 +181,67 @@ def _check_medoids(diss, medoids, init, random_state):
 			raise ValueError("Pass a numpy random generator, RandomState or integer seed")
 		return random_state.choice(diss.shape[0], medoids, False).astype(np.uintp)
 	raise ValueError("Specify the number of medoids, or give a numpy array of initial medoids")
+
+def fasterpam_time(diss, medoids, max_iter=100, init="random", random_state=None, drift_time_window = 1, max_drift = 1, online = False, n_cpu=-1):
+	"""FasterPAM time k-medoids clustering
+
+	:param diss: square numpy array of dissimilarities
+	:type diss: ndarray
+	:param medoids: number of clusters to find or existing medoids
+	:type medoids: int or ndarray
+	:param max_iter: maximum number of iterations
+	:type max_iter: int
+	:param init: initialization method
+	:type init: str, "random", "first" or "build"
+	:param random_state: random seed (also used for shuffling the processing order)
+	:type random_state: int, RandomState instance or None
+	:param n_cpu: number of threads to use (-1: automatic)
+	:type n_cpu: int
+
+	:return: k-medoids clustering result
+	:rtype: KMedoidsResult
+	"""
+	import numpy as np, numbers, os
+	from .kmedoids import _fasterpam_time_f64 #_fasterpam_time_i32, _fasterpam_time_i64, _fasterpam_time_f32, 
+
+	if not isinstance(diss, np.ndarray):
+		diss = np.array(diss)
+
+	if isinstance(medoids, int):
+		#Generate randomly chosen initial medoids
+		if online:
+			raise ValueError("Must pass in array of starting indices for medoids if solving online.")
+		medoids = _check_medoids(diss[0], medoids, init, random_state)
+
+	if isinstance(diss, np.ndarray):
+		ddim = len(diss.shape)
+		dtype = diss.dtype
+		if n_cpu == -1 and diss.shape[0] < 1000: n_cpu = 1
+		if n_cpu == -1 and os.cpu_count() is not None: n_cpu = os.cpu_count()
+		if n_cpu == -1: n_cpu = 1
+		
+		assert n_cpu > 0
+		assert ddim == 3
+		assert random_state is not None
+
+		seed = None
+		if random_state is np.random:
+			seed = np.random.mtrand._rand.randint(0, 2147483647)
+		elif isinstance(random_state, numbers.Integral):
+			seed = int(random_state)
+		elif isinstance(random_state, np.random.RandomState):
+			seed = random_state.randint(0, 2147483647)
+
+		# return KMedoidsResult(*_fasterpam_time_f32(diss, medoids.astype(np.uint64), max_iter, seed))
+		if dtype == np.float64:
+			return KMedoidsResult(*_fasterpam_time_f64(diss, medoids.astype(np.uint64), max_iter,
+											   drift_time_window, max_drift, seed, online))
+		# elif dtype == np.int32:
+		# 	return KMedoidsResult(*_fasterpam_time_i32(diss, medoids.astype(np.uint64), max_iter, seed))
+		# elif dtype == np.int64:
+		# 	return KMedoidsResult(*_fasterpam_time_i64(diss, medoids.astype(np.uint64), max_iter, seed))
+		#KMedoidsResult(*_rand_fasterpam_i64(diss, medoids.astype(np.uint64), max_iter, seed))
+	raise ValueError("Input data not supported. Use a numpy array of floats.")
 
 def fasterpam(diss, medoids, max_iter=100, init="random", random_state=None, n_cpu=-1):
 	"""FasterPAM k-medoids clustering
@@ -901,6 +963,9 @@ class KMedoids(SKLearnClusterer):
 		init="random",
 		max_iter=300,
 		random_state=None,
+		max_drift = 1,
+		drift_time_window = 1,
+		online = False,
 	):
 		self.n_clusters = n_clusters
 		self.metric = metric
@@ -909,6 +974,9 @@ class KMedoids(SKLearnClusterer):
 		self.init = init
 		self.max_iter = max_iter
 		self.random_state = random_state
+		self.max_drift = max_drift
+		self.drift_time_window = drift_time_window
+		self.online = online
 
 	def fit(self, X, y=None):
 		"""Fit K-Medoids to the provided data.
@@ -931,6 +999,10 @@ class KMedoids(SKLearnClusterer):
 			X = pairwise_distances(X, metric=self.metric)
 		if self.method == "fasterpam":
 			result = fasterpam(X, self.n_clusters, self.max_iter, self.init, random_state=self.random_state)
+		elif self.method == "fasterpam_time":
+			result = fasterpam_time(X, self.n_clusters, self.max_iter, self.init,
+					  max_drift = self.max_drift, drift_time_window = self.drift_time_window, random_state=self.random_state,
+					  online = self.online)
 		elif self.method == "fastpam1":
 			result = fastpam1(X, self.n_clusters, self.max_iter, self.init, random_state=self.random_state)
 		elif self.method == "pam":

@@ -80,6 +80,38 @@ rand_call!(rand_fasterpam_f64, rand_fasterpam, f64, f64);
 rand_call!(rand_fasterpam_i32, rand_fasterpam, i32, i64);
 rand_call!(rand_fasterpam_i64, rand_fasterpam, i64, i64);
 
+
+macro_rules! rand_3d_call {
+($name:ident, $variant:ident, $type: ty, $ltype: ty) => {
+/// Run $variant k-medoids clustering function for $type precision
+///
+/// :param dist: distance matrix
+/// :type dist: ndarray
+/// :param meds: initial medoids
+/// :type meds: ndarray
+/// :param max_iter: maximum number of iterations
+/// :type max_iter: int
+/// :param seed: random seed for order permutation
+/// :type seed: int
+/// :return: k-medoids clustering result
+/// :rtype: KMedoidsResult
+#[pyfunction]
+fn $name(dist: PyReadonlyArray3<'_, $type>, meds: PyReadonlyArray1<'_, usize>, max_iter: usize, drift_time_window:usize, max_drift:usize, seed: u64, online: bool) -> PyResult<Py<PyAny>> {
+    assert_eq!(dist.ndim(), 3);
+    assert_eq!(dist.shape()[1], dist.shape()[2]);
+    let mut meds = meds.to_vec()?;
+    let mut rnd = StdRng::seed_from_u64(seed);
+    let (loss, assi_history, n_iter, n_swap, med_history): ($ltype, _, _, _, _) = rustkmedoids::$variant(&dist.as_array(), &mut meds, max_iter, drift_time_window, max_drift, &mut rnd, online);
+    Python::with_gil(|py| -> PyResult<Py<PyAny>> {
+      Ok((loss, PyArray2::from_array(py, &assi_history), PyArray2::from_array(py, &med_history), n_iter, n_swap).to_object(py))
+    })
+}
+}}
+// rand_3d_call!(fasterpam_time_f32, fasterpam_time, f32, f64);
+rand_3d_call!(fasterpam_time_f64, fasterpam_time, f64, f64);
+// rand_3d_call!(fasterpam_time_i32, fasterpam_time, i32, i64);
+// rand_3d_call!(fasterpam_time_i64, fasterpam_time, i64, i64);
+
 macro_rules! par_call {
 ($name:ident, $variant:ident, $type: ty, $ltype: ty) => {
 /// Run $variant k-medoids clustering function for $type precision
@@ -283,6 +315,10 @@ medoid_silhouette_call!(medoid_silhouette_i32, i32);
 #[pymodule]
 #[allow(unused_variables)]
 fn kmedoids(py: Python, m: &PyModule) -> PyResult<()> {
+    // m.add("_fasterpam_time_f32", wrap_pyfunction!(fasterpam_time_f32, m)?)?;
+    m.add("_fasterpam_time_f64", wrap_pyfunction!(fasterpam_time_f64, m)?)?;
+    // m.add("_fasterpam_time_i32", wrap_pyfunction!(fasterpam_time_i32, m)?)?;
+    // m.add("_fasterpam_time_i64", wrap_pyfunction!(fasterpam_time_i64, m)?)?;
     m.add("_fasterpam_f32", wrap_pyfunction!(fasterpam_f32, m)?)?;
     m.add("_fasterpam_f64", wrap_pyfunction!(fasterpam_f64, m)?)?;
     m.add("_fasterpam_i32", wrap_pyfunction!(fasterpam_i32, m)?)?;
